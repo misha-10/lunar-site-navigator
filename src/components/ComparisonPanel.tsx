@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Layers,
   Plus,
@@ -6,26 +6,39 @@ import {
   Scale,
   Sun,
   Radio,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import { useMission } from '../context/MissionContext';
 import { LUNAR_DEMONSTRATION_SITES } from '../data/lunarSites';
+import type { LunarSite } from '../types/mission';
 import type { ComparisonScenario } from '../types/comparison';
 import { evaluateScenarioMetrics, compareScenarios } from '../utils/scenarioEvaluator';
 import { ComparisonCard } from './ComparisonCard';
 import { Button } from './ui/Button';
 import { Card } from './ui/Card';
+import { missionApi } from '../services/missionApi';
 
 export const ComparisonPanel: React.FC = () => {
-  const { selectedSite, missionDate, missionTime } = useMission();
+  const { selectedSite, missionDate, missionTime, allSites, timelineSeries } = useMission();
+
+  // Combine availableSites with fallback
+  const allAvailableSites: LunarSite[] = useMemo(() => {
+    return allSites && allSites.length > 0 ? allSites : LUNAR_DEMONSTRATION_SITES;
+  }, [allSites]);
+
+  const comparisonReqIdRef = useRef(0);
+  const [isComparing, setIsComparing] = useState(false);
 
   // Initial demonstration scenarios (2 scenarios default, up to 3)
   const [scenarios, setScenarios] = useState<ComparisonScenario[]>(() => {
     const siteA =
-      LUNAR_DEMONSTRATION_SITES.find((s) => s.id === 'shackleton-crater') ||
-      LUNAR_DEMONSTRATION_SITES[0];
+      allAvailableSites.find((s: LunarSite) => s.id === 'shackleton-crater' || s.id === 'shackleton_region') ||
+      allAvailableSites[0];
     const siteB =
-      LUNAR_DEMONSTRATION_SITES.find((s) => s.id === 'malapert-massif') ||
-      LUNAR_DEMONSTRATION_SITES[1];
+      allAvailableSites.find((s: LunarSite) => s.id === 'malapert-massif' || s.id === 'malapert_massif') ||
+      allAvailableSites[1] ||
+      allAvailableSites[0];
 
     const scnA: ComparisonScenario = {
       id: 'scenario-a',
@@ -54,6 +67,106 @@ export const ComparisonPanel: React.FC = () => {
     return [scnA, scnB];
   });
 
+  // Query backend POST /mission/compare whenever scenarios change and backend is connected
+  useEffect(() => {
+    const isBackendActive = timelineSeries.data_mode === 'real_ephemeris' || !timelineSeries.isDemoData;
+    if (!isBackendActive) {
+      return;
+    }
+
+    const reqId = ++comparisonReqIdRef.current;
+    setIsComparing(true);
+
+    const start_datetime_utc = `${scenarios[0].date}T${scenarios[0].time || '00:00'}:00.000Z`;
+    const startDate = new Date(start_datetime_utc);
+    const end_datetime_utc = new Date(startDate.getTime() + 168 * 3600 * 1000).toISOString();
+
+    const payload = {
+      scenarios: scenarios.map((s) => ({
+        scenario_id: s.id,
+        name: s.label,
+        site_id: s.site.id,
+        latitude_deg: s.site.latitude,
+        longitude_deg: s.site.longitude,
+        observer_altitude_m: s.site.elevation_m ?? 0,
+      })),
+      start_datetime_utc,
+      end_datetime_utc,
+      step_minutes: 60,
+    };
+
+    missionApi
+      .compareScenarios(payload)
+      .then((resp) => {
+        if (reqId !== comparisonReqIdRef.current || !resp || !resp.results) return;
+
+        setScenarios((prev) =>
+          prev.map((scn) => {
+            if (scn.isSimulatedMissing) return scn;
+            const res = resp.results.find((r) => r.scenario_id === scn.id);
+            if (!res) return scn;
+
+            const sunSummary = res.sun_summary;
+            const earthSummary = res.earth_summary;
+            const sample0 = res.samples && res.samples.length > 0 ? res.samples[0] : null;
+
+            const solarEl =
+              sample0?.sun?.elevation_deg ??
+              (sample0 as any)?.sun_elevation_deg ??
+              sunSummary.mean_elevation_deg;
+            const earthEl =
+              sample0?.earth?.elevation_deg ??
+              (sample0 as any)?.earth_elevation_deg ??
+              earthSummary.mean_elevation_deg;
+
+            const mode: 'real_ephemeris' | 'unavailable' | 'demonstration_simulation' =
+              res.metadata?.data_mode === 'real_ephemeris' ? 'real_ephemeris' : 'demonstration_simulation';
+
+            return {
+              ...scn,
+              isDemoData: mode !== 'real_ephemeris',
+              dataMode: mode,
+              metrics: {
+                solarElevation: solarEl,
+                sunlightDurationHours: sunSummary.interpolated_geometric_visibility_hours,
+                sunlightPercentage: Number(
+                  ((sunSummary.interpolated_geometric_visibility_hours / 168) * 100).toFixed(1)
+                ),
+                earthElevation: earthEl,
+                commVisibilityDurationHours: earthSummary.interpolated_geometric_visibility_hours,
+                commPercentage: Number(
+                  ((earthSummary.interpolated_geometric_visibility_hours / 168) * 100).toFixed(1)
+                ),
+                totalSampledSunlightHours: sunSummary.total_sampled_geometric_visibility_hours,
+                interpolatedSunlightHours: sunSummary.interpolated_geometric_visibility_hours,
+                totalSampledCommHours: earthSummary.total_sampled_geometric_visibility_hours,
+                interpolatedCommHours: earthSummary.interpolated_geometric_visibility_hours,
+                meanSolarElevation: sunSummary.mean_elevation_deg,
+                meanEarthElevation: earthSummary.mean_elevation_deg,
+                minSolarElevation: sunSummary.min_elevation_deg,
+                maxSolarElevation: sunSummary.max_elevation_deg,
+                minEarthElevation: earthSummary.min_elevation_deg,
+                maxEarthElevation: earthSummary.max_elevation_deg,
+              },
+            };
+          })
+        );
+      })
+      .catch((err) => {
+        console.warn('[ComparisonPanel] Compare API call failed:', err);
+      })
+      .finally(() => {
+        if (reqId === comparisonReqIdRef.current) {
+          setIsComparing(false);
+        }
+      });
+  }, [
+    timelineSeries.data_mode,
+    timelineSeries.isDemoData,
+    scenarios.length,
+    scenarios.map((s) => `${s.id}-${s.site.id}-${s.date}-${s.time}-${s.isSimulatedMissing}`).join(','),
+  ]);
+
   // Evaluate comparison analysis across scenarios for each individual metric
   const metricComparison = useMemo(() => {
     return compareScenarios(scenarios);
@@ -61,7 +174,7 @@ export const ComparisonPanel: React.FC = () => {
 
   // Handlers for updating scenario properties
   const handleUpdateSite = (scenarioId: string, siteId: string) => {
-    const foundSite = LUNAR_DEMONSTRATION_SITES.find((s) => s.id === siteId);
+    const foundSite = allAvailableSites.find((s: LunarSite) => s.id === siteId) || LUNAR_DEMONSTRATION_SITES.find((s: LunarSite) => s.id === siteId);
     if (!foundSite) return;
 
     setScenarios((prev) =>
@@ -177,12 +290,12 @@ export const ComparisonPanel: React.FC = () => {
   const handleAddScenario = () => {
     if (scenarios.length >= 3) return;
 
-    // Pick a candidate site not currently in the comparison list, or fallback to site 2 or 3
+    // Pick a candidate site not currently in the comparison list
     const existingSiteIds = new Set(scenarios.map((s) => s.site.id));
     const nextSite =
-      LUNAR_DEMONSTRATION_SITES.find((s) => !existingSiteIds.has(s.id)) ||
-      LUNAR_DEMONSTRATION_SITES[2] ||
-      LUNAR_DEMONSTRATION_SITES[0];
+      allAvailableSites.find((s: LunarSite) => !existingSiteIds.has(s.id)) ||
+      allAvailableSites[2] ||
+      allAvailableSites[0];
 
     const label = scenarios.length === 2 ? 'Scenario C' : `Scenario ${scenarios.length + 1}`;
     const id = `scenario-${Date.now()}`;
@@ -218,11 +331,12 @@ export const ComparisonPanel: React.FC = () => {
   // Reset to initial baseline presets
   const handleReset = () => {
     const siteA =
-      LUNAR_DEMONSTRATION_SITES.find((s) => s.id === 'shackleton-crater') ||
-      LUNAR_DEMONSTRATION_SITES[0];
+      allAvailableSites.find((s: LunarSite) => s.id === 'shackleton-crater' || s.id === 'shackleton_region') ||
+      allAvailableSites[0];
     const siteB =
-      LUNAR_DEMONSTRATION_SITES.find((s) => s.id === 'malapert-massif') ||
-      LUNAR_DEMONSTRATION_SITES[1];
+      allAvailableSites.find((s: LunarSite) => s.id === 'malapert-massif' || s.id === 'malapert_massif') ||
+      allAvailableSites[1] ||
+      allAvailableSites[0];
 
     setScenarios([
       {
@@ -250,6 +364,8 @@ export const ComparisonPanel: React.FC = () => {
     ]);
   };
 
+  const isAnyLive = scenarios.some((s) => !s.isDemoData);
+
   return (
     <div className="space-y-6">
       {/* 1. Header Toolbar */}
@@ -266,6 +382,22 @@ export const ComparisonPanel: React.FC = () => {
               <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#152033] text-[#38BDF8] border border-[#263449]">
                 Comparing {scenarios.length} of 3 Scenarios
               </span>
+              {isAnyLive ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/30 font-bold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-[#38BDF8]" />
+                  LIVE SPICE EPHEMERIS
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
+                  DEMO SIMULATION
+                </span>
+              )}
+              {isComparing && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/20 flex items-center gap-1 animate-pulse">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Calculating...
+                </span>
+              )}
             </div>
             <p className="text-xs font-mono text-slate-400">
               Multi-parameter trade-off analysis across candidate landing sites and launch epochs
@@ -313,7 +445,7 @@ export const ComparisonPanel: React.FC = () => {
             scenario={scn}
             baselineScenario={scenarios[0]}
             isBaseline={idx === 0}
-            allSites={LUNAR_DEMONSTRATION_SITES}
+            allSites={allAvailableSites}
             onUpdateSite={(siteId) => handleUpdateSite(scn.id, siteId)}
             onUpdateDate={(newDate) => handleUpdateDate(scn.id, newDate)}
             onUpdateTime={(newTime) => handleUpdateTime(scn.id, newTime)}
@@ -408,9 +540,9 @@ export const ComparisonPanel: React.FC = () => {
                 <td className="py-3 pr-4 font-medium text-slate-200">
                   <div className="flex items-center gap-1.5">
                     <Sun className="w-3.5 h-3.5 text-[#38BDF8]" />
-                    <span>Cumulative Sunlight Duration</span>
+                    <span>Interpolated Sunlight Duration</span>
                   </div>
-                  <div className="text-[10px] text-slate-500">14-Day Artemis Window (336h)</div>
+                  <div className="text-[10px] text-slate-500">Continuous Horizon Crossing (h)</div>
                 </td>
                 {scenarios.map((scn) => {
                   const val = scn.metrics.sunlightDurationHours;
@@ -418,7 +550,7 @@ export const ComparisonPanel: React.FC = () => {
                   const isLeader = metricComparison.find((m) => m.key === 'sunlightDurationHours')?.leadingScenarioId === scn.id;
                   return (
                     <td key={scn.id} className="py-3 px-3">
-                      {val === null ? (
+                      {val === null || Number.isNaN(val) ? (
                         <span className="text-slate-500 font-bold">--</span>
                       ) : (
                         <div className="flex items-center gap-1.5">
@@ -439,15 +571,40 @@ export const ComparisonPanel: React.FC = () => {
                   {(() => {
                     const comp = metricComparison.find((m) => m.key === 'sunlightDurationHours');
                     const leader = scenarios.find((s) => s.id === comp?.leadingScenarioId);
-                    if (leader) {
+                    if (leader && leader.metrics.sunlightDurationHours !== null) {
                       return (
                         <span className="text-[#38BDF8] font-medium">
-                          {leader.label} maximizes illumination window ({leader.metrics.sunlightDurationHours?.toFixed(1)}h / {leader.metrics.sunlightPercentage?.toFixed(1)}%)
+                          {leader.label} maximizes continuous horizon window ({leader.metrics.sunlightDurationHours.toFixed(1)}h)
                         </span>
                       );
                     }
                     return <span>Metric comparable or data unavailable</span>;
                   })()}
+                </td>
+              </tr>
+
+              {/* Row 2b: Observed Sampled Sunlight (Discrete Sum) */}
+              <tr className="hover:bg-[#152033]/40 transition bg-[#080D18]/30">
+                <td className="py-2.5 pr-4 font-medium text-slate-300 pl-4 border-l-2 border-[#38BDF8]/50">
+                  <div className="text-xs">Observed Sampled Sunlight</div>
+                  <div className="text-[10px] text-slate-500">Discrete Sample Pairs Sum (h)</div>
+                </td>
+                {scenarios.map((scn) => {
+                  const val = scn.metrics.totalSampledSunlightHours;
+                  return (
+                    <td key={scn.id} className="py-2.5 px-3">
+                      {val === null || val === undefined || Number.isNaN(val) ? (
+                        <span className="text-slate-500 font-bold">--</span>
+                      ) : (
+                        <span className="font-mono text-slate-300">
+                          {val.toFixed(1)}h
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="py-2.5 pl-4 text-[10px] text-slate-500 font-mono">
+                  Observed visibility between valid telemetry sample intervals
                 </td>
               </tr>
 
@@ -465,7 +622,7 @@ export const ComparisonPanel: React.FC = () => {
                   const isLeader = metricComparison.find((m) => m.key === 'earthElevation')?.leadingScenarioId === scn.id;
                   return (
                     <td key={scn.id} className="py-3 px-3">
-                      {val === null ? (
+                      {val === null || Number.isNaN(val) ? (
                         <span className="text-slate-500 font-bold">--</span>
                       ) : (
                         <div className="flex items-center gap-1.5">
@@ -486,10 +643,10 @@ export const ComparisonPanel: React.FC = () => {
                   {(() => {
                     const comp = metricComparison.find((m) => m.key === 'earthElevation');
                     const leader = scenarios.find((s) => s.id === comp?.leadingScenarioId);
-                    if (leader) {
+                    if (leader && leader.metrics.earthElevation !== null) {
                       return (
                         <span className="text-[#60A5FA] font-medium">
-                          {leader.label} provides highest direct Earth angle ({leader.metrics.earthElevation! > 0 ? `+${leader.metrics.earthElevation?.toFixed(2)}` : leader.metrics.earthElevation?.toFixed(2)}°)
+                          {leader.label} provides highest direct Earth angle ({leader.metrics.earthElevation > 0 ? `+${leader.metrics.earthElevation.toFixed(2)}` : leader.metrics.earthElevation.toFixed(2)}°)
                         </span>
                       );
                     }
@@ -503,7 +660,7 @@ export const ComparisonPanel: React.FC = () => {
                 <td className="py-3 pr-4 font-medium text-slate-200">
                   <div className="flex items-center gap-1.5">
                     <Radio className="w-3.5 h-3.5 text-[#34D399]" />
-                    <span>Direct-to-Earth Comm Duration</span>
+                    <span>Interpolated DTE Comm Duration</span>
                   </div>
                   <div className="text-[10px] text-slate-500">Unocculted Line-of-Sight Window (h)</div>
                 </td>
@@ -513,7 +670,7 @@ export const ComparisonPanel: React.FC = () => {
                   const isLeader = metricComparison.find((m) => m.key === 'commVisibilityDurationHours')?.leadingScenarioId === scn.id;
                   return (
                     <td key={scn.id} className="py-3 px-3">
-                      {val === null ? (
+                      {val === null || Number.isNaN(val) ? (
                         <span className="text-slate-500 font-bold">--</span>
                       ) : (
                         <div className="flex items-center gap-1.5">
@@ -534,15 +691,40 @@ export const ComparisonPanel: React.FC = () => {
                   {(() => {
                     const comp = metricComparison.find((m) => m.key === 'commVisibilityDurationHours');
                     const leader = scenarios.find((s) => s.id === comp?.leadingScenarioId);
-                    if (leader) {
+                    if (leader && leader.metrics.commVisibilityDurationHours !== null) {
                       return (
                         <span className="text-[#34D399] font-medium">
-                          {leader.label} delivers longest continuous RF link ({leader.metrics.commVisibilityDurationHours?.toFixed(1)}h / {leader.metrics.commPercentage?.toFixed(1)}%)
+                          {leader.label} delivers longest continuous RF link ({leader.metrics.commVisibilityDurationHours.toFixed(1)}h / {leader.metrics.commPercentage?.toFixed(1)}%)
                         </span>
                       );
                     }
                     return <span>Metric comparable or data unavailable</span>;
                   })()}
+                </td>
+              </tr>
+
+              {/* Row 4b: Observed Sampled Comm (Discrete Sum) */}
+              <tr className="hover:bg-[#152033]/40 transition bg-[#080D18]/30">
+                <td className="py-2.5 pr-4 font-medium text-slate-300 pl-4 border-l-2 border-[#34D399]/50">
+                  <div className="text-xs">Observed Sampled Comm</div>
+                  <div className="text-[10px] text-slate-500">Discrete Sample Pairs Sum (h)</div>
+                </td>
+                {scenarios.map((scn) => {
+                  const val = scn.metrics.totalSampledCommHours;
+                  return (
+                    <td key={scn.id} className="py-2.5 px-3">
+                      {val === null || val === undefined || Number.isNaN(val) ? (
+                        <span className="text-slate-500 font-bold">--</span>
+                      ) : (
+                        <span className="font-mono text-slate-300">
+                          {val.toFixed(1)}h
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="py-2.5 pl-4 text-[10px] text-slate-500 font-mono">
+                  Observed DTE visibility between valid telemetry sample intervals
                 </td>
               </tr>
             </tbody>

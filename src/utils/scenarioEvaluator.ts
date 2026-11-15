@@ -23,7 +23,7 @@ export function evaluateScenarioMetrics(
     };
   }
 
-  // Generate deterministic 14-day ephemeris starting at the selected date
+  // Generate deterministic 7-day ephemeris starting at the selected date
   const isoStart = `${date}T00:00:00.000Z`;
   const series = generateSiteTimelineSeries(site.id, isoStart);
 
@@ -45,6 +45,14 @@ export function evaluateScenarioMetrics(
     earthElevation: landingPoint.earthElevation,
     commVisibilityDurationHours: series.summary.totalCommHours,
     commPercentage: series.summary.commPercentage,
+    totalSampledSunlightHours: series.summary.totalSunlightHours,
+    interpolatedSunlightHours: series.summary.totalSunlightHours,
+    totalSampledCommHours: series.summary.totalCommHours,
+    interpolatedCommHours: series.summary.totalCommHours,
+    minSolarElevation: series.summary.minSolarElevation,
+    maxSolarElevation: series.summary.maxSolarElevation,
+    minEarthElevation: series.summary.minEarthElevation,
+    maxEarthElevation: series.summary.maxEarthElevation,
   };
 }
 
@@ -67,7 +75,7 @@ export function compareScenarios(scenarios: ComparisonScenario[]): MetricCompari
       title: 'Cumulative Sunlight Duration',
       unit: 'h',
       category: 'power',
-      description: 'Total continuous and intermittent illumination window across 14 Earth days (336 hours).',
+      description: 'Total continuous and intermittent illumination window across 7 Earth days (168 hours).',
     },
     {
       key: 'earthElevation',
@@ -81,7 +89,7 @@ export function compareScenarios(scenarios: ComparisonScenario[]): MetricCompari
       title: 'Direct-to-Earth Comm Duration',
       unit: 'h',
       category: 'comms',
-      description: 'Total line-of-sight visibility window to Earth stations across 14 Earth days (336 hours).',
+      description: 'Total line-of-sight visibility window to Earth stations across 7 Earth days (168 hours).',
     },
   ];
 
@@ -93,7 +101,7 @@ export function compareScenarios(scenarios: ComparisonScenario[]): MetricCompari
 
     for (const scn of scenarios) {
       const val = scn.metrics[config.key];
-      if (val !== null && val !== undefined) {
+      if (val !== null && val !== undefined && typeof val === 'number' && !Number.isNaN(val)) {
         validCount++;
         if (val > maxVal) {
           maxVal = val;

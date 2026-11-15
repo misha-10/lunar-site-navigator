@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sun, Eye, EyeOff } from 'lucide-react';
+import { Sun, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import type { CelestialPosition } from '../types/mission';
 import { Badge } from './ui/Badge';
 
@@ -19,21 +19,36 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
     elevation,
     terrainElevationAtAzimuth,
     isDemoData = true,
+    data_mode,
+    reason,
   } = position;
 
-  // Scientific evaluation: Geometric elevation vs terrain visibility
-  const isGeometricallyAboveHorizon = elevation >= 0;
+  // Scientific validation: Guard against NaN, null, and unavailable calculations
+  const isAvailable =
+    !isNaN(elevation) &&
+    isFinite(elevation) &&
+    !isNaN(azimuth) &&
+    isFinite(azimuth) &&
+    position.status !== 'unavailable';
 
-  // Never show an object below the horizon as geometrically visible
+  // Scientific evaluation: Geometric elevation vs terrain visibility
+  const isGeometricallyAboveHorizon = isAvailable && elevation >= 0;
+
+  // Never claim terrain blockage if terrain was not evaluated
+  const terrainEvaluated = terrainElevationAtAzimuth !== undefined && position.terrain_visible !== null;
+
   const isTerrainBlocked =
     isGeometricallyAboveHorizon &&
+    terrainEvaluated &&
     terrainElevationAtAzimuth !== undefined &&
     elevation < terrainElevationAtAzimuth;
 
   const isDirectlyVisible = isGeometricallyAboveHorizon && !isTerrainBlocked;
+  const isLiveSpice = !isDemoData && data_mode === 'real_ephemeris';
 
   // Compass cardinal estimation from azimuth
   const getCardinal = (az: number): string => {
+    if (!isAvailable) return '--';
     const norm = ((az % 360) + 360) % 360;
     const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
     const idx = Math.round(norm / 22.5) % 16;
@@ -46,17 +61,21 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
         <div className="flex items-center gap-2">
           <Sun className={`w-4 h-4 ${isDirectlyVisible ? 'text-[#FBBF24]' : 'text-slate-500'}`} />
           <span className="text-xs font-mono font-semibold text-slate-200">SUN</span>
-          {isDemoData && <Badge variant="neutral">Demo Data</Badge>}
+          {isLiveSpice ? (
+            <Badge variant="success" hasDot>LIVE</Badge>
+          ) : isDemoData ? (
+            <Badge variant="neutral">Demo Data</Badge>
+          ) : null}
         </div>
         <div className="flex items-center gap-3 text-xs font-mono">
           <span className="text-slate-400">
-            Az: <strong className="text-slate-200">{azimuth.toFixed(1)}°</strong>
+            Az: <strong className="text-slate-200">{isAvailable ? `${azimuth.toFixed(1)}°` : 'Unavailable'}</strong>
           </span>
-          <span className={elevation >= 0 ? 'text-[#FBBF24] font-bold' : 'text-slate-500 font-bold'}>
-            El: {elevation >= 0 ? `+${elevation.toFixed(2)}` : elevation.toFixed(2)}°
+          <span className={!isAvailable ? 'text-slate-500' : elevation >= 0 ? 'text-[#FBBF24] font-bold' : 'text-slate-500 font-bold'}>
+            El: {!isAvailable ? 'Unavailable' : elevation >= 0 ? `+${elevation.toFixed(2)}°` : `${elevation.toFixed(2)}°`}
           </span>
-          <Badge variant={isDirectlyVisible ? 'amber' : 'neutral'}>
-            {isDirectlyVisible ? 'Sunlit' : isTerrainBlocked ? 'Terrain Shadow' : 'Sub-Horizon'}
+          <Badge variant={!isAvailable ? 'neutral' : isDirectlyVisible ? 'amber' : 'neutral'}>
+            {!isAvailable ? 'Unavailable' : isDirectlyVisible ? 'Sunlit' : isTerrainBlocked ? 'Terrain Shadow' : 'Sub-Horizon'}
           </Badge>
         </div>
       </div>
@@ -66,7 +85,9 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
   return (
     <div
       className={`p-3.5 rounded-lg border transition-colors ${
-        isDirectlyVisible
+        !isAvailable
+          ? 'bg-[#101827] border-[#263449]'
+          : isDirectlyVisible
           ? 'bg-[#152033]/90 border-[#FBBF24]/40'
           : 'bg-[#101827] border-[#263449]'
       } ${className}`}
@@ -76,7 +97,9 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
         <div className="flex items-center gap-2">
           <div
             className={`w-6 h-6 rounded flex items-center justify-center ${
-              isDirectlyVisible
+              !isAvailable
+                ? 'bg-slate-800 text-slate-500'
+                : isDirectlyVisible
                 ? 'bg-[#FBBF24]/20 text-[#FBBF24]'
                 : 'bg-slate-800 text-slate-500'
             }`}
@@ -88,19 +111,41 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
               Solar Vector
             </h4>
             <span className="text-[10px] font-mono text-slate-400">
-              Topocentric Coordinates
+              Topocentric Coordinates (0° Horizon Plane)
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {isDemoData && (
+          {isLiveSpice ? (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-bold">
+              LIVE SPICE EPHEMERIS
+            </span>
+          ) : isDemoData ? (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#152033] text-amber-300/80 border border-amber-500/30">
               DEMO DATA
             </span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-rose-500/10 text-rose-400 border border-rose-500/30">
+              UNAVAILABLE
+            </span>
           )}
-          <Badge variant={isDirectlyVisible ? 'amber' : isTerrainBlocked ? 'warning' : 'neutral'} hasDot>
-            {isDirectlyVisible
+
+          <Badge
+            variant={
+              !isAvailable
+                ? 'neutral'
+                : isDirectlyVisible
+                ? 'amber'
+                : isTerrainBlocked
+                ? 'warning'
+                : 'neutral'
+            }
+            hasDot
+          >
+            {!isAvailable
+              ? 'Unavailable'
+              : isDirectlyVisible
               ? 'Illuminating'
               : isTerrainBlocked
               ? 'Terrain Blocked'
@@ -118,11 +163,13 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
           </div>
           <div className="flex items-baseline justify-between mt-0.5">
             <span className="text-sm font-mono font-bold text-slate-100">
-              {azimuth.toFixed(2)}°
+              {isAvailable ? `${azimuth.toFixed(2)}°` : 'Unavailable'}
             </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              ({getCardinal(azimuth)})
-            </span>
+            {isAvailable && (
+              <span className="text-[10px] font-mono text-slate-400">
+                ({getCardinal(azimuth)})
+              </span>
+            )}
           </div>
         </div>
 
@@ -134,13 +181,25 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
           <div className="flex items-baseline justify-between mt-0.5">
             <span
               className={`text-sm font-mono font-bold ${
-                elevation >= 0 ? 'text-[#FBBF24]' : 'text-slate-500'
+                !isAvailable
+                  ? 'text-slate-500'
+                  : elevation >= 0
+                  ? 'text-[#FBBF24]'
+                  : 'text-slate-500'
               }`}
             >
-              {elevation >= 0 ? `+${elevation.toFixed(2)}` : elevation.toFixed(2)}°
+              {!isAvailable
+                ? 'Unavailable'
+                : elevation >= 0
+                ? `+${elevation.toFixed(2)}°`
+                : `${elevation.toFixed(2)}°`}
             </span>
             <span className="text-[10px] font-mono text-slate-500">
-              {isGeometricallyAboveHorizon ? 'Above 0°' : 'Below 0°'}
+              {!isAvailable
+                ? 'No Ephemeris'
+                : isGeometricallyAboveHorizon
+                ? 'Above 0°'
+                : 'Below 0°'}
             </span>
           </div>
         </div>
@@ -150,17 +209,34 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
       <div className="pt-2 border-t border-[#263449]/70 space-y-1.5 text-[11px] font-mono">
         <div className="flex items-center justify-between text-slate-400">
           <span>Geometric Elevation:</span>
-          <span className={isGeometricallyAboveHorizon ? 'text-[#34D399] font-semibold' : 'text-[#F87171]'}>
-            {isGeometricallyAboveHorizon ? '≥ 0° (Above Tangent Plane)' : '< 0° (Sub-Horizon)'}
+          <span
+            className={
+              !isAvailable
+                ? 'text-slate-500 font-semibold'
+                : isGeometricallyAboveHorizon
+                ? 'text-[#34D399] font-semibold'
+                : 'text-[#F87171]'
+            }
+          >
+            {!isAvailable
+              ? 'Calculation Unavailable'
+              : isGeometricallyAboveHorizon
+              ? '≥ 0° (Above Tangent Plane)'
+              : '< 0° (Sub-Horizon)'}
           </span>
         </div>
 
-        {terrainElevationAtAzimuth !== undefined && (
+        {terrainEvaluated && terrainElevationAtAzimuth !== undefined ? (
           <div className="flex items-center justify-between text-slate-400">
             <span>Terrain Horizon Crest:</span>
             <span className="text-slate-200">
               +{terrainElevationAtAzimuth.toFixed(2)}°
             </span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between text-slate-500 text-[10px]">
+            <span>Topographic Terrain:</span>
+            <span>Not Evaluated (Geometric Horizon Only)</span>
           </div>
         )}
 
@@ -168,14 +244,21 @@ export const SunIndicator: React.FC<SunIndicatorProps> = ({
           <span>Surface Visibility:</span>
           <span
             className={`font-semibold flex items-center gap-1 ${
-              isDirectlyVisible
+              !isAvailable
+                ? 'text-slate-500'
+                : isDirectlyVisible
                 ? 'text-[#FBBF24]'
                 : isTerrainBlocked
                 ? 'text-[#F87171]'
                 : 'text-slate-500'
             }`}
           >
-            {isDirectlyVisible ? (
+            {!isAvailable ? (
+              <>
+                <AlertCircle className="w-3 h-3 text-slate-500" />{' '}
+                {reason ? `UNAVAILABLE: ${reason}` : 'EPHEMERIS UNAVAILABLE'}
+              </>
+            ) : isDirectlyVisible ? (
               <>
                 <Eye className="w-3 h-3" /> DIRECT SOLAR ILLUMINATION
               </>

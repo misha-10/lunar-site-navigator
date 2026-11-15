@@ -39,6 +39,17 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
     currentEarthPosition,
   } = useMission();
 
+  const isLiveSpice = timelineSeries.data_mode === 'real_ephemeris' || !timelineSeries.isDemoData;
+  const totalHours =
+    timelineSeries.totalHours > 0
+      ? timelineSeries.totalHours
+      : timelineSeries.points.length > 0
+      ? timelineSeries.points.length
+      : 168;
+  const totalDays = Math.max(1, Math.round(totalHours / 24));
+  const latStr = `${Math.abs(selectedSite.latitude).toFixed(2)}°${selectedSite.latitude < 0 ? 'S' : 'N'}`;
+  const lonStr = `${Math.abs(selectedSite.longitude).toFixed(2)}°${selectedSite.longitude < 0 ? 'W' : 'E'}`;
+
   // Transparent feasibility weighting state
   const [weights, setWeights] = useState<FeasibilityWeights>({
     sunlightWeight: 0.4,
@@ -49,10 +60,10 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
   const [activePreset, setActivePreset] = useState<'balanced' | 'solar' | 'comm'>('balanced');
   const [showFormulaDetails, setShowFormulaDetails] = useState<boolean>(false);
 
-  // 1. Calculate operational windows across the full 336-hour series
+  // 1. Calculate operational windows across the full evaluated series
   const windowMetrics = useMemo(() => {
     const points = timelineSeries.points;
-    const total = points.length;
+    const total = points.length > 0 ? points.length : 1;
 
     let simultaneousCount = 0; // Sunlit AND DTE Comm
     let batteryOnlyCount = 0; // In shadow AND DTE Comm
@@ -70,7 +81,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
     }
 
     return {
-      totalHours: total,
+      totalHours: points.length,
       simultaneousHours: simultaneousCount,
       simultaneousPct: Math.round((simultaneousCount / total) * 1000) / 10,
       batteryOnlyHours: batteryOnlyCount,
@@ -161,9 +172,16 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
               <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-slate-100">
                 Mission Summary & Executive Assessment
               </h2>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
-                DEMO EVALUATION
-              </span>
+              {isLiveSpice ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/30 font-bold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-[#38BDF8]" />
+                  LIVE SPICE EPHEMERIS
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
+                  DEMO EVALUATION
+                </span>
+              )}
             </div>
             <p className="text-xs font-mono text-slate-400">
               Operational synthesis across solar, communications, and temporal mission constraints
@@ -179,7 +197,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             <span className="text-slate-200 font-bold">
               {missionDate} {missionTime} UTC
             </span>
-            <span className="text-slate-500">(Step {currentTimelineStep + 1}/336)</span>
+            <span className="text-slate-500">(Step {currentTimelineStep + 1}/{timelineSeries.points.length})</span>
           </div>
         </div>
       </div>
@@ -215,7 +233,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             <div className="flex items-center justify-between pt-1 border-t border-[#263449]/50">
               <span className="text-slate-400">Coordinates:</span>
               <span className="text-[#38BDF8] font-bold">
-                {Math.abs(selectedSite.latitude).toFixed(2)}°S, {selectedSite.longitude.toFixed(2)}°E
+                {latStr}, {lonStr}
               </span>
             </div>
 
@@ -251,7 +269,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
               </h3>
             </div>
             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#152033] border border-[#263449] text-[#38BDF8]">
-              14-DAY SURFACE WINDOW
+              {totalDays}-DAY SURFACE WINDOW
             </span>
           </div>
 
@@ -274,7 +292,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             <div className="flex items-center justify-between pt-1 border-t border-[#263449]/50">
               <span className="text-slate-400">Evaluation Window:</span>
               <span className="text-slate-300">
-                336 Hours (14.0 Earth Days / ~0.5 Lunar Synodic Day)
+                {totalHours} Hours ({totalDays} Earth Days / ~{(totalDays / 29.5).toFixed(2)} Lunar Synodic Day)
               </span>
             </div>
 
@@ -322,12 +340,14 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             <div className="p-2.5 rounded bg-[#080D18] border border-[#263449] space-y-1">
               <span className="text-[10px] text-slate-500 uppercase">Current Solar Elevation</span>
               <div className="text-lg font-bold text-[#FBBF24]">
-                {currentSunPosition.elevation > 0
+                {currentSunPosition.elevation === null || Number.isNaN(currentSunPosition.elevation)
+                  ? '--'
+                  : currentSunPosition.elevation > 0
                   ? `+${currentSunPosition.elevation.toFixed(2)}`
                   : currentSunPosition.elevation.toFixed(2)}°
               </div>
               <span className="text-[10px] text-slate-400">
-                Azimuth: {currentSunPosition.azimuth.toFixed(1)}°
+                Azimuth: {Number.isNaN(currentSunPosition.azimuth) ? '--' : `${currentSunPosition.azimuth.toFixed(1)}°`}
               </span>
             </div>
 
@@ -340,7 +360,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
                 </span>
               </div>
               <span className="text-[10px] text-slate-400">
-                Across 336h window
+                Across {totalHours}h window
               </span>
             </div>
 
@@ -396,12 +416,14 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             <div className="p-2.5 rounded bg-[#080D18] border border-[#263449] space-y-1">
               <span className="text-[10px] text-slate-500 uppercase">Current Earth Elevation</span>
               <div className="text-lg font-bold text-[#60A5FA]">
-                {currentEarthPosition.elevation > 0
+                {currentEarthPosition.elevation === null || Number.isNaN(currentEarthPosition.elevation)
+                  ? '--'
+                  : currentEarthPosition.elevation > 0
                   ? `+${currentEarthPosition.elevation.toFixed(2)}`
                   : currentEarthPosition.elevation.toFixed(2)}°
               </div>
               <span className="text-[10px] text-slate-400">
-                Azimuth: {currentEarthPosition.azimuth.toFixed(1)}°
+                Azimuth: {Number.isNaN(currentEarthPosition.azimuth) ? '--' : `${currentEarthPosition.azimuth.toFixed(1)}°`}
               </span>
             </div>
 
@@ -453,7 +475,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
             </h3>
           </div>
           <span className="text-[10px] font-mono text-slate-500">
-            Total Window: 336 Hours (100.0%)
+            Total Window: {windowMetrics.totalHours} Hours (100.0%)
           </span>
         </div>
 
@@ -689,7 +711,7 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
               <ShieldAlert className="w-3.5 h-3.5 shrink-0" /> Micro-Topography
             </span>
             <p className="text-[10px] text-slate-400 font-sans leading-tight">
-              LRO LOLA elevation grids at 20-30m/pixel do not resolve sub-metre boulders, crater rim micro-slopes, or surface roughness.
+              Geometric line-of-sight evaluated above 0° tangent horizon plane (IAU reference sphere R=1737.4 km). Micro-topographic crest obstruction is pending high-resolution LOLA DEM integration.
             </p>
           </div>
 
@@ -718,7 +740,9 @@ export const MissionSummary: React.FC<{ className?: string }> = ({ className = '
               <Radio className="w-3.5 h-3.5 shrink-0" /> Ephemeris Model Fidelity
             </span>
             <p className="text-[10px] text-slate-400 font-sans leading-tight">
-              Solar and Earth positions use simplified demonstration orbital mechanics. Operational flight certification requires full numerical NASA JPL SPICE kernels.
+              {isLiveSpice
+                ? 'Solar and Earth vectors calculated using NASA JPL NAIF SPICE kernels (DE421 ephemeris with IAU_MOON body-fixed orientation).'
+                : 'Demonstration simulation orbital model. Operational flight certification requires full numerical NASA JPL SPICE kernels.'}
             </p>
           </div>
         </div>

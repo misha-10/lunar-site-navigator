@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class SpiceService:
     """Thread-safe service for managing NASA NAIF SPICE kernels and computations."""
 
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self, kernel_dir: Optional[Path] = None, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
@@ -113,49 +113,70 @@ class SpiceService:
 
     def get_loaded_kernels(self) -> List[str]:
         """Return list of currently loaded kernel filenames."""
-        loaded = []
-        try:
-            count = spiceypy.ktotal("ALL")
-            for i in range(count):
-                data = spiceypy.kdata(i, "ALL")
-                loaded.append(Path(data[0]).name)
-        except Exception:
-            pass
-        return loaded
+        with self._lock:
+            loaded = []
+            try:
+                count = spiceypy.ktotal("ALL")
+                for i in range(count):
+                    data = spiceypy.kdata(i, "ALL")
+                    loaded.append(Path(data[0]).name)
+            except Exception:
+                pass
+            return loaded
 
     def utc_to_et(self, utc_iso_str: str) -> float:
         """Convert ISO 8601 UTC timestamp to Ephemeris Time (ET / TDB seconds past J2000).
 
         Requires leapseconds kernel (LSK) to be loaded.
         """
-        if not self.is_ready():
-            raise RuntimeError(
-                f"SPICE kernels not ready. Missing: {', '.join(self.get_missing_kernels())}"
-            )
-        try:
-            return float(spiceypy.str2et(utc_iso_str))
-        except (SpiceyError, SpiceyPyError) as exc:
-            raise ValueError(f"SPICE failed to convert UTC timestamp '{utc_iso_str}': {exc}") from exc
+        with self._lock:
+            if not self.is_ready():
+                raise RuntimeError(
+                    f"SPICE kernels not ready. Missing: {', '.join(self.get_missing_kernels())}"
+                )
+            try:
+                return float(spiceypy.str2et(utc_iso_str))
+            except (SpiceyError, SpiceyPyError) as exc:
+                raise ValueError(f"SPICE failed to convert UTC timestamp '{utc_iso_str}': {exc}") from exc
 
     def determine_lunar_frame(self, et: float) -> str:
         """Determine highest-fidelity available lunar body-fixed reference frame at instant ET."""
-        # Check MOON_ME first (Mean Earth/Polar Axis frame, requires frame/binary PCK)
-        if spiceypy.namfrm("MOON_ME") != 0:
+        with self._lock:
+            # Check MOON_ME first (Mean Earth/Polar Axis frame, requires frame/binary PCK)
             try:
-                spiceypy.pxform("J2000", "MOON_ME", et)
-                return "MOON_ME"
-            except Exception:
-                pass
+                if spiceypy.namfrm("MOON_ME") != 0:
+                    try:
+                        spiceypy.pxform("J2000", "MOON_ME", et)
+                        return "MOON_ME"
+                    except (SpiceyError, SpiceyPyError, Exception):
+                        try:
+                            spiceypy.reset()
+                        except Exception:
+                            pass
+            except (SpiceyError, SpiceyPyError, Exception):
+                try:
+                    spiceypy.reset()
+                except Exception:
+                    pass
 
-        # Check IAU_MOON (standard IAU analytical lunar body-fixed frame)
-        if spiceypy.namfrm("IAU_MOON") != 0:
+            # Check IAU_MOON (standard IAU analytical lunar body-fixed frame)
             try:
-                spiceypy.pxform("J2000", "IAU_MOON", et)
-                return "IAU_MOON"
-            except Exception:
-                pass
+                if spiceypy.namfrm("IAU_MOON") != 0:
+                    try:
+                        spiceypy.pxform("J2000", "IAU_MOON", et)
+                        return "IAU_MOON"
+                    except (SpiceyError, SpiceyPyError, Exception):
+                        try:
+                            spiceypy.reset()
+                        except Exception:
+                            pass
+            except (SpiceyError, SpiceyPyError, Exception):
+                try:
+                    spiceypy.reset()
+                except Exception:
+                    pass
 
-        raise RuntimeError("No valid lunar body-fixed reference frame (MOON_ME or IAU_MOON) available in SPICE pool.")
+            raise RuntimeError("No valid lunar body-fixed reference frame (MOON_ME or IAU_MOON) available in SPICE pool.")
 
     def get_body_position_wrt_moon(
         self,
@@ -165,11 +186,12 @@ class SpiceService:
         abcorr: str = "LT+S",
     ) -> Tuple[np.ndarray, float]:
         """Compute 3D position vector (km) of target relative to Moon body center in specified frame."""
-        try:
-            pos, lt = spiceypy.spkpos(target_body, et, frame, abcorr, "MOON")
-            return np.array(pos, dtype=np.float64), float(lt)
-        except (SpiceyError, SpiceyPyError) as exc:
-            raise RuntimeError(f"SPICE spkpos failed for target {target_body} relative to MOON: {exc}") from exc
+        with self._lock:
+            try:
+                pos, lt = spiceypy.spkpos(target_body, et, frame, abcorr, "MOON")
+                return np.array(pos, dtype=np.float64), float(lt)
+            except (SpiceyError, SpiceyPyError) as exc:
+                raise RuntimeError(f"SPICE spkpos failed for target {target_body} relative to MOON: {exc}") from exc
 
     def unload_all(self) -> None:
         """Unload all kernels and reset the SPICE kernel pool."""

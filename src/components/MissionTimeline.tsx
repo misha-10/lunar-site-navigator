@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -10,9 +10,7 @@ import {
   Clock,
   Sun,
   Radio,
-  Sliders,
   Layers,
-  Sparkles,
   AlertTriangle,
 } from 'lucide-react';
 import type { SiteTimelineSeries, TimelineDataPoint } from '../types/mission';
@@ -21,9 +19,9 @@ import { CommunicationChart } from './CommunicationChart';
 import { Button } from './ui/Button';
 
 export interface MissionTimelineProps {
-  /** Complete 14-day time series data for the selected site */
+  /** Complete time series data for the selected site */
   series: SiteTimelineSeries;
-  /** Active timeline step index (0 to 335) */
+  /** Active timeline step index (0 to points.length - 1) */
   currentStepIndex: number;
   /** Callback triggered when the timeline epoch is changed */
   onStepChange: (newStepIndex: number) => void;
@@ -47,15 +45,28 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
   const [simulateMissingData, setSimulateMissingData] = useState<boolean>(false);
 
   const totalSteps = series.points.length;
+  const totalDays = Math.max(1, Math.round(series.totalHours / 24));
   const activePoint: TimelineDataPoint =
     series.points[currentStepIndex] || series.points[0];
 
+  // Derive step interval in minutes from adjacent timestamps
+  const stepMinutes = useMemo(() => {
+    if (series.points.length > 1) {
+      const dtMs =
+        new Date(series.points[1].timestamp).getTime() -
+        new Date(series.points[0].timestamp).getTime();
+      const mins = Math.round(dtMs / 60000);
+      if (mins > 0 && mins <= 360) return mins;
+    }
+    return 60;
+  }, [series.points]);
+
   // Optional synthetic dataset with simulated telemetry gaps to test missing-data handling
-  const displayData: TimelineDataPoint[] = React.useMemo(() => {
+  const displayData: TimelineDataPoint[] = useMemo(() => {
     if (!simulateMissingData) return series.points;
     return series.points.map((pt, idx) => {
-      // Simulate telemetry dropout between hours 72-84 and 200-210
-      if ((idx >= 72 && idx <= 84) || (idx >= 200 && idx <= 210)) {
+      // Simulate telemetry dropout between hours 24-36 and 100-112
+      if ((idx >= 24 && idx <= 36) || (idx >= 100 && idx <= 112)) {
         return {
           ...pt,
           sunElevation: null,
@@ -106,43 +117,48 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
     handleJump(currentStepIndex + delta);
   };
 
-  // Quick event search helper: find first step matching a condition
-  const handleJumpToEvent = (eventType: 'shadow' | 'peakSun' | 'maxEarth') => {
-    if (eventType === 'shadow') {
-      const found = series.points.find((p, i) => i > currentStepIndex && !p.isSunlit);
-      if (found) handleJump(found.stepIndex);
-      else {
-        const wrap = series.points.find((p) => !p.isSunlit);
-        if (wrap) handleJump(wrap.stepIndex);
+  const handleDayDelta = (days: number) => {
+    const stepsPerHour = 60 / stepMinutes;
+    const stepsPerDay = Math.round(24 * stepsPerHour);
+    handleJump(currentStepIndex + days * stepsPerDay);
+  };
+
+  // Find next transition events (sunrise, sunset, comm acquire, comm loss)
+  const jumpToNextEvent = (type: 'sunlit' | 'comm') => {
+    for (let i = currentStepIndex + 1; i < totalSteps; i++) {
+      const current = series.points[i];
+      const prev = series.points[i - 1];
+      if (type === 'sunlit' && !prev.isSunlit && current.isSunlit) {
+        handleJump(i);
+        return;
       }
-    } else if (eventType === 'peakSun') {
-      let maxEl = -999;
-      let maxIdx = 0;
-      series.points.forEach((p, i) => {
-        if (p.sunElevation !== null && p.sunElevation > maxEl) {
-          maxEl = p.sunElevation;
-          maxIdx = i;
-        }
-      });
-      handleJump(maxIdx);
-    } else if (eventType === 'maxEarth') {
-      let maxEl = -999;
-      let maxIdx = 0;
-      series.points.forEach((p, i) => {
-        if (p.earthElevation !== null && p.earthElevation > maxEl) {
-          maxEl = p.earthElevation;
-          maxIdx = i;
-        }
-      });
-      handleJump(maxIdx);
+      if (type === 'comm' && !prev.hasEarthComm && current.hasEarthComm) {
+        handleJump(i);
+        return;
+      }
+    }
+    // Wrap around to search from start
+    for (let i = 1; i <= currentStepIndex; i++) {
+      const current = series.points[i];
+      const prev = series.points[i - 1];
+      if (type === 'sunlit' && !prev.isSunlit && current.isSunlit) {
+        handleJump(i);
+        return;
+      }
+      if (type === 'comm' && !prev.hasEarthComm && current.hasEarthComm) {
+        handleJump(i);
+        return;
+      }
     }
   };
 
+  const isLiveSpice = !isDemoData && series.data_mode === 'real_ephemeris';
+
   return (
     <div className={`space-y-4 ${className}`}>
-      {/* 1. Main Temporal Epoch & Playback Scrubber Control Panel */}
+      {/* 1. Main Scrubber & Playback Dashboard Card */}
       <div className="p-4 rounded-lg bg-[#101827] border border-[#263449] space-y-4">
-        {/* Top Header Row: Readout & Telemetry Status Badges */}
+        {/* Top Header Row: Active Timestamp & Status Readout */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#263449]">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded bg-[#38BDF8]/10 text-[#38BDF8] flex items-center justify-center border border-[#38BDF8]/20 shrink-0">
@@ -153,9 +169,17 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
                 <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100">
                   Mission Timeline Scrubber
                 </span>
-                {isDemoData && (
+                {isLiveSpice ? (
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-bold">
+                    LIVE SPICE EPHEMERIS ({stepMinutes}-MIN STEP)
+                  </span>
+                ) : isDemoData ? (
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
                     DEMO SIMULATION
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-slate-800 text-slate-400 border border-[#263449]">
+                    {stepMinutes}-MIN STEP
                   </span>
                 )}
               </div>
@@ -166,7 +190,7 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
                 <span className="text-slate-500">•</span>
                 <span className="text-slate-300 font-semibold">
                   T+{String(Math.floor(activePoint.missionHour / 24)).padStart(2, '0')}d{' '}
-                  {String(activePoint.missionHour % 24).padStart(2, '0')}h:00m
+                  {String(Math.floor(activePoint.missionHour % 24)).padStart(2, '0')}h:00m
                 </span>
                 <span className="text-slate-500">•</span>
                 <span className="text-slate-400">
@@ -193,7 +217,9 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
                 SUN: {activePoint.isSunlit ? 'SUNLIT' : activePoint.isSunGeometricVisible ? 'TERRAIN SHADOW' : 'SUB-HORIZON'}
               </span>
               <span className="font-bold">
-                ({activePoint.sunElevation !== null && activePoint.sunElevation > 0 ? `+${activePoint.sunElevation.toFixed(1)}°` : `${activePoint.sunElevation?.toFixed(1) ?? '--'}°`})
+                {activePoint.sunElevation !== null && !isNaN(activePoint.sunElevation)
+                  ? `(${activePoint.sunElevation > 0 ? `+${activePoint.sunElevation.toFixed(1)}°` : `${activePoint.sunElevation.toFixed(1)}°`})`
+                  : '(--)'}
               </span>
             </div>
 
@@ -212,7 +238,9 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
                 EARTH DTE: {activePoint.hasEarthComm ? 'LINK ACTIVE' : activePoint.isEarthGeometricVisible ? 'OCCULTED' : 'SUB-HORIZON'}
               </span>
               <span className="font-bold">
-                ({activePoint.earthElevation !== null && activePoint.earthElevation > 0 ? `+${activePoint.earthElevation.toFixed(1)}°` : `${activePoint.earthElevation?.toFixed(1) ?? '--'}°`})
+                {activePoint.earthElevation !== null && !isNaN(activePoint.earthElevation)
+                  ? `(${activePoint.earthElevation > 0 ? `+${activePoint.earthElevation.toFixed(1)}°` : `${activePoint.earthElevation.toFixed(1)}°`})`
+                  : '(--)'}
               </span>
             </div>
           </div>
@@ -225,7 +253,7 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
             <span className="text-[#38BDF8] font-bold uppercase">
               Current Epoch: {activePoint.label} (Hour {activePoint.missionHour})
             </span>
-            <span>T+14d (336h Epoch End)</span>
+            <span>T+{String(totalDays).padStart(2, '0')}d ({series.totalHours}h Epoch End)</span>
           </div>
 
           <div className="relative flex items-center">
@@ -243,14 +271,9 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
 
           {/* Major Day Marker Labels Along Slider */}
           <div className="flex justify-between text-[9px] font-mono text-slate-600 px-1 pt-0.5">
-            <span>D1</span>
-            <span>D3</span>
-            <span>D5</span>
-            <span>D7</span>
-            <span>D9</span>
-            <span>D11</span>
-            <span>D13</span>
-            <span>D14</span>
+            {Array.from({ length: totalDays }, (_, i) => (
+              <span key={`day-${i + 1}`}>D{i + 1}</span>
+            ))}
           </div>
         </div>
 
@@ -268,64 +291,75 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
               {isPlaying ? 'Pause' : 'Play Timeline'}
             </Button>
 
-            <div className="h-5 w-px bg-[#263449] mx-1" />
-
-            {/* Fine-Grained Step Navigation */}
             <Button
-              size="xs"
+              size="sm"
               variant="secondary"
               onClick={() => handleJump(0)}
-              title="Jump to Mission Start (T+0)"
+              title="Jump to Start"
             >
-              <RotateCcw className="w-3 h-3" />
-            </Button>
-            <Button
-              size="xs"
-              variant="secondary"
-              onClick={() => handleStepDelta(-24)}
-              title="Previous Day (-24h)"
-            >
-              <SkipBack className="w-3 h-3" />
-              <span className="hidden sm:inline">-24h</span>
-            </Button>
-            <Button
-              size="xs"
-              variant="secondary"
-              onClick={() => handleStepDelta(-1)}
-              title="Previous Hour (-1h)"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>-1h</span>
-            </Button>
-            <Button
-              size="xs"
-              variant="secondary"
-              onClick={() => handleStepDelta(1)}
-              title="Next Hour (+1h)"
-            >
-              <span>+1h</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Button>
-            <Button
-              size="xs"
-              variant="secondary"
-              onClick={() => handleStepDelta(24)}
-              title="Next Day (+24h)"
-            >
-              <SkipForward className="w-3 h-3" />
-              <span className="hidden sm:inline">+24h</span>
+              <RotateCcw className="w-3.5 h-3.5" />
             </Button>
 
-            {/* Playback Speed Multiplier */}
-            <div className="ml-2 flex items-center bg-[#080D18] border border-[#263449] rounded p-0.5 text-[10px]">
-              {([1, 2, 5] as const).map((spd) => (
+            {/* Step Steppers */}
+            <div className="flex items-center bg-[#080D18] border border-[#263449] rounded p-0.5">
+              <button
+                type="button"
+                onClick={() => handleStepDelta(-1)}
+                disabled={currentStepIndex <= 0}
+                className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400"
+                title="Step backward 1 interval"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-1.5 text-[10px] text-slate-400 select-none">
+                STEP
+              </span>
+              <button
+                type="button"
+                onClick={() => handleStepDelta(1)}
+                disabled={currentStepIndex >= totalSteps - 1}
+                className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400"
+                title="Step forward 1 interval"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Day Steppers */}
+            <div className="flex items-center bg-[#080D18] border border-[#263449] rounded p-0.5">
+              <button
+                type="button"
+                onClick={() => handleDayDelta(-1)}
+                disabled={currentStepIndex <= 0}
+                className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400"
+                title="Jump backward 24 hours"
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-1.5 text-[10px] text-slate-400 select-none">
+                DAY
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDayDelta(1)}
+                disabled={currentStepIndex >= totalSteps - 1}
+                className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400"
+                title="Jump forward 24 hours"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Playback Speed Selector */}
+            <div className="flex items-center gap-1 bg-[#080D18] border border-[#263449] rounded p-0.5">
+              {[1, 2, 5].map((spd) => (
                 <button
                   key={spd}
                   type="button"
                   onClick={() => setPlaybackSpeed(spd)}
-                  className={`px-1.5 py-0.5 rounded transition ${
+                  className={`px-1.5 py-0.5 text-[10px] rounded ${
                     playbackSpeed === spd
-                      ? 'bg-[#38BDF8] text-slate-950 font-bold'
+                      ? 'bg-[#38BDF8] text-[#080D18] font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -335,44 +369,34 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
             </div>
           </div>
 
-          {/* Right: Quick Event Jump Buttons */}
+          {/* Right: Quick Event Jump Shortcuts */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 hidden md:inline uppercase">Jump To:</span>
+            <span className="text-[10px] text-slate-500 uppercase">JUMP TO:</span>
             <Button
               size="xs"
               variant="secondary"
-              onClick={() => handleJumpToEvent('peakSun')}
-              className="text-[10px]"
+              onClick={() => jumpToNextEvent('sunlit')}
+              className="gap-1 text-[11px]"
             >
-              <Sparkles className="w-3 h-3 text-[#FBBF24]" />
-              Peak Sun
+              <Sun className="w-3 h-3 text-[#FBBF24]" />
+              <span>Next Sunrise</span>
             </Button>
             <Button
               size="xs"
               variant="secondary"
-              onClick={() => handleJumpToEvent('shadow')}
-              className="text-[10px]"
+              onClick={() => jumpToNextEvent('comm')}
+              className="gap-1 text-[11px]"
             >
-              <Sliders className="w-3 h-3 text-amber-400" />
-              Shadow Entry
-            </Button>
-            <Button
-              size="xs"
-              variant="secondary"
-              onClick={() => handleJumpToEvent('maxEarth')}
-              className="text-[10px]"
-            >
-              <Radio className="w-3 h-3 text-[#60A5FA]" />
-              Max Libration
+              <Radio className="w-3 h-3 text-[#34D399]" />
+              <span>Next DTE Comm</span>
             </Button>
           </div>
         </div>
       </div>
 
-      {/* 2. Chart View Controls & Missing Data Verification Toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-        {/* Chart View Switcher Tabs */}
-        <div className="flex items-center bg-[#101827] border border-[#263449] p-1 rounded-lg">
+      {/* 2. Chart Mode Selector Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-1 p-1 bg-[#101827] border border-[#263449] rounded-lg text-xs font-mono">
           <button
             type="button"
             onClick={() => setActiveTab('all')}
@@ -383,7 +407,7 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Dual Charts (Illumination & Comm)</span>
+            <span>Dual Stack View (Solar + Comm)</span>
           </button>
           <button
             type="button"
@@ -395,7 +419,7 @@ export const MissionTimeline: React.FC<MissionTimelineProps> = ({
             }`}
           >
             <Sun className="w-3.5 h-3.5" />
-            <span>Solar Illumination Only</span>
+            <span>Solar Elevation Only</span>
           </button>
           <button
             type="button"

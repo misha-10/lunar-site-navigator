@@ -2,7 +2,7 @@ import type { TimelineDataPoint, SiteTimelineSeries, TimelineSummaryMetrics } fr
 import { DEMONSTRATION_CELESTIAL_DATA } from './demonstrationCelestial';
 
 /**
- * Procedurally generates a deterministic, physically representative 14-day (336-hour)
+ * Procedurally generates a deterministic, physically representative 7-day (168-hour)
  * polar ephemeris and terrain visibility time-series for a given landing site.
  * 
  * Labeled explicitly with isDemoData: true.
@@ -16,7 +16,7 @@ export function generateSiteTimelineSeries(
     DEMONSTRATION_CELESTIAL_DATA['shackleton-crater'];
 
   const startDate = new Date(startIso);
-  const totalHours = 336; // 14 Earth days
+  const totalHours = 168; // 7 Earth days (matches backend MAX_TIMELINE_DAYS contract)
   const points: TimelineDataPoint[] = [];
 
   // Orbital physics parameters for lunar South Pole:
@@ -152,4 +152,6 @@ export const DEMONSTRATION_TIMELINE_SERIES: Record<string, SiteTimelineSeries> =
   'malapert-massif': generateSiteTimelineSeries('malapert-massif'),
   'connecting-ridge': generateSiteTimelineSeries('connecting-ridge'),
   'nobile-crater': generateSiteTimelineSeries('nobile-crater'),
+  'shackleton_region': generateSiteTimelineSeries('shackleton_region'),
+  'nobile_crater_region': generateSiteTimelineSeries('nobile_crater_region'),
 };

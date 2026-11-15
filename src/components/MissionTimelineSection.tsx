@@ -10,7 +10,7 @@ export const MissionTimelineSection: React.FC = () => {
       series={timelineSeries}
       currentStepIndex={currentTimelineStep}
       onStepChange={setCurrentTimelineStep}
-      isDemoData={true}
+      isDemoData={timelineSeries.isDemoData ?? true}
     />
   );
 };

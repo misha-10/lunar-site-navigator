@@ -58,7 +58,14 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
 
   // Helper to compute numeric delta vs baseline scenario
   const getDeltaDisplay = (currentVal: number | null, baselineVal: number | null, unit: string) => {
-    if (isBaseline || currentVal === null || baselineVal === null) return null;
+    if (
+      isBaseline ||
+      currentVal === null ||
+      baselineVal === null ||
+      Number.isNaN(currentVal) ||
+      Number.isNaN(baselineVal)
+    )
+      return null;
     const diff = currentVal - baselineVal;
     if (Math.abs(diff) < 0.01) {
       return (
@@ -110,9 +117,13 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
                 BASELINE
               </span>
             )}
-            {scenario.isDemoData && (
+            {scenario.isDemoData ? (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
                 DEMO
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/30 font-bold">
+                LIVE SPICE
               </span>
             )}
           </div>
@@ -223,10 +234,10 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
             )}
           </div>
 
-          {metrics.solarElevation === null ? (
+          {metrics.solarElevation === null || Number.isNaN(metrics.solarElevation) ? (
             <div className="flex items-center gap-1.5 py-0.5 text-xs font-mono text-slate-500">
               <AlertTriangle className="w-3 h-3 text-amber-500/70" />
-              <span>-- (DATA UNAVAILABLE)</span>
+              <span>DATA UNAVAILABLE</span>
             </div>
           ) : (
             <div className="flex items-baseline justify-between">
@@ -258,24 +269,33 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
             )}
           </div>
 
-          {metrics.sunlightDurationHours === null ? (
+          {metrics.sunlightDurationHours === null || Number.isNaN(metrics.sunlightDurationHours) ? (
             <div className="flex items-center gap-1.5 py-0.5 text-xs font-mono text-slate-500">
               <AlertTriangle className="w-3 h-3 text-amber-500/70" />
-              <span>-- (DATA UNAVAILABLE)</span>
+              <span>DATA UNAVAILABLE</span>
             </div>
           ) : (
-            <div className="flex items-baseline justify-between">
-              <span className="text-xl font-mono font-bold text-[#38BDF8]">
-                {metrics.sunlightDurationHours.toFixed(1)}h{' '}
-                <span className="text-xs text-slate-400 font-normal">
-                  ({metrics.sunlightPercentage?.toFixed(1)}%)
+            <div className="space-y-1">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-mono font-bold text-[#38BDF8]">
+                  {metrics.sunlightDurationHours.toFixed(1)}h{' '}
+                  <span className="text-xs text-slate-400 font-normal">
+                    ({metrics.sunlightPercentage?.toFixed(1)}%)
+                  </span>
                 </span>
-              </span>
-              {getDeltaDisplay(
-                metrics.sunlightDurationHours,
-                baselineScenario?.metrics.sunlightDurationHours ?? null,
-                'h'
-              )}
+                {getDeltaDisplay(
+                  metrics.sunlightDurationHours,
+                  baselineScenario?.metrics.sunlightDurationHours ?? null,
+                  'h'
+                )}
+              </div>
+              {metrics.totalSampledSunlightHours !== undefined &&
+                metrics.totalSampledSunlightHours !== null && (
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between pt-0.5 border-t border-[#263449]/40">
+                    <span>Sampled: {metrics.totalSampledSunlightHours.toFixed(1)}h</span>
+                    <span>Interpolated: {metrics.interpolatedSunlightHours?.toFixed(1) ?? metrics.sunlightDurationHours.toFixed(1)}h</span>
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -300,10 +320,10 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
             )}
           </div>
 
-          {metrics.earthElevation === null ? (
+          {metrics.earthElevation === null || Number.isNaN(metrics.earthElevation) ? (
             <div className="flex items-center gap-1.5 py-0.5 text-xs font-mono text-slate-500">
               <AlertTriangle className="w-3 h-3 text-amber-500/70" />
-              <span>-- (DATA UNAVAILABLE)</span>
+              <span>DATA UNAVAILABLE</span>
             </div>
           ) : (
             <div className="flex items-baseline justify-between">
@@ -335,24 +355,33 @@ export const ComparisonCard: React.FC<ComparisonCardProps> = ({
             )}
           </div>
 
-          {metrics.commVisibilityDurationHours === null ? (
+          {metrics.commVisibilityDurationHours === null || Number.isNaN(metrics.commVisibilityDurationHours) ? (
             <div className="flex items-center gap-1.5 py-0.5 text-xs font-mono text-slate-500">
               <AlertTriangle className="w-3 h-3 text-amber-500/70" />
-              <span>-- (DATA UNAVAILABLE)</span>
+              <span>DATA UNAVAILABLE</span>
             </div>
           ) : (
-            <div className="flex items-baseline justify-between">
-              <span className="text-xl font-mono font-bold text-[#34D399]">
-                {metrics.commVisibilityDurationHours.toFixed(1)}h{' '}
-                <span className="text-xs text-slate-400 font-normal">
-                  ({metrics.commPercentage?.toFixed(1)}%)
+            <div className="space-y-1">
+              <div className="flex items-baseline justify-between">
+                <span className="text-xl font-mono font-bold text-[#34D399]">
+                  {metrics.commVisibilityDurationHours.toFixed(1)}h{' '}
+                  <span className="text-xs text-slate-400 font-normal">
+                    ({metrics.commPercentage?.toFixed(1)}%)
+                  </span>
                 </span>
-              </span>
-              {getDeltaDisplay(
-                metrics.commVisibilityDurationHours,
-                baselineScenario?.metrics.commVisibilityDurationHours ?? null,
-                'h'
-              )}
+                {getDeltaDisplay(
+                  metrics.commVisibilityDurationHours,
+                  baselineScenario?.metrics.commVisibilityDurationHours ?? null,
+                  'h'
+                )}
+              </div>
+              {metrics.totalSampledCommHours !== undefined &&
+                metrics.totalSampledCommHours !== null && (
+                  <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between pt-0.5 border-t border-[#263449]/40">
+                    <span>Sampled: {metrics.totalSampledCommHours.toFixed(1)}h</span>
+                    <span>Interpolated: {metrics.interpolatedCommHours?.toFixed(1) ?? metrics.commVisibilityDurationHours.toFixed(1)}h</span>
+                  </div>
+                )}
             </div>
           )}
         </div>

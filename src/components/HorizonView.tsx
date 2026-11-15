@@ -55,14 +55,29 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
   // Zero-degree local geometric horizon Y-coordinate
   const zeroHorizonY = mapElToY(0);
 
-  // Position coordinates for Sun and Earth
-  const sunX = mapAzToX(sunPosition.azimuth);
-  const sunY = mapElToY(sunPosition.elevation);
-  const isSunAboveHorizon = sunPosition.elevation >= 0;
+  // Validate Sun and Earth availability against NaN and unavailable status
+  const isSunAvailable =
+    !isNaN(sunPosition.elevation) &&
+    isFinite(sunPosition.elevation) &&
+    !isNaN(sunPosition.azimuth) &&
+    isFinite(sunPosition.azimuth) &&
+    sunPosition.status !== 'unavailable';
 
-  const earthX = mapAzToX(earthPosition.azimuth);
-  const earthY = mapElToY(earthPosition.elevation);
-  const isEarthAboveHorizon = earthPosition.elevation >= 0;
+  const isEarthAvailable =
+    !isNaN(earthPosition.elevation) &&
+    isFinite(earthPosition.elevation) &&
+    !isNaN(earthPosition.azimuth) &&
+    isFinite(earthPosition.azimuth) &&
+    earthPosition.status !== 'unavailable';
+
+  // Position coordinates for Sun and Earth
+  const sunX = isSunAvailable ? mapAzToX(sunPosition.azimuth) : 0;
+  const sunY = isSunAvailable ? mapElToY(sunPosition.elevation) : 0;
+  const isSunAboveHorizon = isSunAvailable && sunPosition.elevation >= 0;
+
+  const earthX = isEarthAvailable ? mapAzToX(earthPosition.azimuth) : 0;
+  const earthY = isEarthAvailable ? mapElToY(earthPosition.elevation) : 0;
+  const isEarthAboveHorizon = isEarthAvailable && earthPosition.elevation >= 0;
 
   // Generate Terrain Silhouette Path if terrainProfile (360 points) is supplied
   let terrainPathD = '';
@@ -94,136 +109,115 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
     { az: 360, label: '360° N' },
   ];
 
+  const isLiveSpice = !isDemoData && sunPosition.data_mode === 'real_ephemeris';
+
   return (
     <Card className={`space-y-4 ${className}`}>
       {/* Top Header */}
       <CardHeader>
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded bg-[#152033] border border-[#263449] flex items-center justify-center text-[#38BDF8]">
-            <Compass className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <CardTitle>Local Horizon Visualization</CardTitle>
-              {isDemoData && (
-                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                  DEMO DATA
-                </span>
-              )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded bg-[#38BDF8]/10 text-[#38BDF8] flex items-center justify-center border border-[#38BDF8]/20 shrink-0">
+              <Compass className="w-4 h-4" />
             </div>
-            <p className="text-[11px] font-mono text-slate-400">
-              Site: <strong className="text-slate-200">{siteName}</strong> • Topocentric Tangent Plane (0° Datum)
-            </p>
+            <div>
+              <CardTitle className="text-sm font-mono font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
+                <span>Topocentric Horizon Coordinate View</span>
+                {isLiveSpice ? (
+                  <Badge variant="success" hasDot>
+                    LIVE SPICE EPHEMERIS
+                  </Badge>
+                ) : isDemoData ? (
+                  <Badge variant="neutral">
+                    DEMO HORIZON
+                  </Badge>
+                ) : (
+                  <Badge variant="warning">
+                    CALCULATION UNAVAILABLE
+                  </Badge>
+                )}
+              </CardTitle>
+              <p className="text-xs font-mono text-slate-400">
+                Azimuth [0°–360°] vs Elevation [-10° to +25°] relative to local tangent horizon plane ({siteName})
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <Badge variant="cyan" hasDot>
-            360° Panorama
-          </Badge>
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="text-slate-400 hidden sm:inline">Reference Plane:</span>
+            <span className="px-2 py-0.5 rounded bg-[#101827] border border-[#263449] text-[#38BDF8] font-bold">
+              0.0° Tangent Plane
+            </span>
+          </div>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Main 360° Horizon Skyplot SVG */}
-        <div className="relative w-full rounded-lg bg-[#080D18] border border-[#263449] p-3 overflow-hidden select-none">
-          {/* Subtle Ambient Space Vignette */}
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(56,189,248,0.03)_0%,transparent_60%)] pointer-events-none" />
-
+        {/* Main Horizon 2D Cartesian Projection Canvas */}
+        <div className="relative w-full rounded-lg bg-[#080D18] border border-[#263449] p-2 overflow-hidden select-none">
           <svg
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="w-full h-auto overflow-visible"
+            role="img"
+            aria-label="Local lunar topocentric horizon chart showing Sun and Earth coordinates"
           >
             <defs>
-              {/* Sub-horizon lunar bulk gradient */}
-              <linearGradient id="lunarBulkGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0B101C" stopOpacity="0.95" />
-                <stop offset="100%" stopColor="#05080E" stopOpacity="1" />
+              {/* Sky Background Gradient */}
+              <linearGradient id="skyGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0B132B" />
+                <stop offset="60%" stopColor="#080D18" />
+                <stop offset="100%" stopColor="#030712" />
               </linearGradient>
 
-              {/* Terrain blockage silhouette gradient */}
-              <linearGradient id="terrainMaskGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#1E293B" stopOpacity="0.8" />
-                <stop offset="100%" stopColor="#0F172A" stopOpacity="0.9" />
+              {/* Sub-horizon Shadow Gradient */}
+              <linearGradient id="subHorizonGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#1E293B" stopOpacity="0.4" />
+                <stop offset="100%" stopColor="#020617" stopOpacity="0.95" />
               </linearGradient>
 
-              {/* Sun radial glow */}
+              {/* Terrain Silhouette Area Fill */}
+              <linearGradient id="terrainAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#334155" stopOpacity="0.6" />
+                <stop offset="100%" stopColor="#1E293B" stopOpacity="0.2" />
+              </linearGradient>
+
+              {/* Sun Marker Halo Gradient */}
               <radialGradient id="sunMarkerGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#FBBF24" stopOpacity="1" />
-                <stop offset="50%" stopColor="#F59E0B" stopOpacity="0.5" />
-                <stop offset="100%" stopColor="#D97706" stopOpacity="0" />
+                <stop offset="0%" stopColor="#FBBF24" stopOpacity="0.8" />
+                <stop offset="40%" stopColor="#FBBF24" stopOpacity="0.3" />
+                <stop offset="100%" stopColor="#FBBF24" stopOpacity="0" />
               </radialGradient>
 
-              {/* Earth radial glow */}
+              {/* Earth Marker Halo Gradient */}
               <radialGradient id="earthMarkerGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#60A5FA" stopOpacity="1" />
-                <stop offset="50%" stopColor="#3B82F6" stopOpacity="0.5" />
-                <stop offset="100%" stopColor="#1D4ED8" stopOpacity="0" />
+                <stop offset="0%" stopColor="#60A5FA" stopOpacity="0.8" />
+                <stop offset="40%" stopColor="#60A5FA" stopOpacity="0.3" />
+                <stop offset="100%" stopColor="#60A5FA" stopOpacity="0" />
               </radialGradient>
-
-              {/* Sub-horizon subterranean hatching pattern */}
-              <pattern
-                id="subterraneanHatch"
-                width="10"
-                height="10"
-                patternTransform="rotate(45 0 0)"
-                patternUnits="userSpaceOnUse"
-              >
-                <line x1="0" y1="0" x2="0" y2="10" stroke="#162032" strokeWidth="1" />
-              </pattern>
             </defs>
 
-            {/* 1. Sub-Horizon Region (Negative Elevation: Below 0° Local Tangent Plane) */}
+            {/* Background Canvas */}
+            <rect
+              x={padLeft}
+              y={padTop}
+              width={plotWidth}
+              height={plotHeight}
+              fill="url(#skyGradient)"
+            />
+
+            {/* 1. Sub-Horizon Area Shading (< 0° Elevation) */}
             <rect
               x={padLeft}
               y={zeroHorizonY}
               width={plotWidth}
               height={padTop + plotHeight - zeroHorizonY}
-              fill="url(#lunarBulkGrad)"
-            />
-            <rect
-              x={padLeft}
-              y={zeroHorizonY}
-              width={plotWidth}
-              height={padTop + plotHeight - zeroHorizonY}
-              fill="url(#subterraneanHatch)"
-              opacity="0.6"
+              fill="url(#subHorizonGradient)"
             />
 
-            {/* Sub-horizon label watermark */}
-            <text
-              x={padLeft + plotWidth / 2}
-              y={zeroHorizonY + 35}
-              fill="#263449"
-              fontSize="10"
-              fontFamily="monospace"
-              fontWeight="bold"
-              letterSpacing="2"
-              textAnchor="middle"
-              className="select-none"
-            >
-              SUB-HORIZON ZONE • OCCULTED BY LUNAR BULK (ELEVATION &lt; 0°)
-            </text>
-
-            {/* 2. Optional Terrain Profile (Relief Occultation) */}
-            {terrainAreaD && (
-              <>
-                <path d={terrainAreaD} fill="url(#terrainMaskGrad)" />
-                <path
-                  d={terrainPathD}
-                  fill="none"
-                  stroke="#38BDF8"
-                  strokeWidth="1.2"
-                  strokeOpacity="0.75"
-                />
-              </>
-            )}
-
-            {/* 3. Elevation Grid Lines (Horizontal) */}
+            {/* 2. Elevation Grid Lines (Horizontal) */}
             {elevationTicks.map((el) => {
               const y = mapElToY(el);
-              const isZero = el === 0;
-
+              const isHorizon = el === 0;
               return (
                 <g key={`el-${el}`}>
                   <line
@@ -231,62 +225,31 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
                     y1={y}
                     x2={padLeft + plotWidth}
                     y2={y}
-                    stroke={isZero ? '#38BDF8' : el < 0 ? '#1C273A' : '#1E293B'}
-                    strokeWidth={isZero ? 1.8 : 0.8}
-                    strokeDasharray={isZero ? 'none' : '2 4'}
+                    stroke={isHorizon ? '#38BDF8' : '#1E293B'}
+                    strokeWidth={isHorizon ? 1.5 : 0.8}
+                    strokeDasharray={isHorizon ? 'none' : '3 3'}
+                    strokeOpacity={isHorizon ? 0.9 : 0.6}
                   />
-                  {/* Elevation axis label */}
+                  {/* Elevation Y-Axis Label */}
                   <text
                     x={padLeft - 6}
                     y={y + 3}
                     textAnchor="end"
-                    fill={isZero ? '#38BDF8' : el < 0 ? '#64748B' : '#94A3B8'}
+                    fill={isHorizon ? '#38BDF8' : '#64748B'}
                     fontSize="9"
                     fontFamily="monospace"
-                    fontWeight={isZero ? 'bold' : 'normal'}
+                    fontWeight={isHorizon ? 'bold' : 'normal'}
                   >
-                    {el >= 0 ? `+${el}°` : `${el}°`}
+                    {el > 0 ? `+${el}°` : `${el}°`}
                   </text>
                 </g>
               );
             })}
 
-            {/* Explicit 0.0° Local Horizon Datum Line Banner */}
-            <g>
-              <line
-                x1={padLeft}
-                y1={zeroHorizonY}
-                x2={padLeft + plotWidth}
-                y2={zeroHorizonY}
-                stroke="#38BDF8"
-                strokeWidth="1.6"
-              />
-              <rect
-                x={padLeft + plotWidth - 190}
-                y={zeroHorizonY - 14}
-                width="185"
-                height="13"
-                rx="2"
-                fill="#101827"
-                stroke="#38BDF8"
-                strokeWidth="0.8"
-              />
-              <text
-                x={padLeft + plotWidth - 97}
-                y={zeroHorizonY - 4}
-                textAnchor="middle"
-                fill="#38BDF8"
-                fontSize="8"
-                fontFamily="monospace"
-                fontWeight="bold"
-              >
-                0.0° LOCAL GEOMETRIC HORIZON
-              </text>
-            </g>
-
-            {/* 4. Azimuth Grid Lines & Cardinal Labels (Vertical) */}
+            {/* 3. Azimuth Grid Lines (Vertical) */}
             {azimuthTicks.map(({ az, label }) => {
               const x = mapAzToX(az);
+              const isCardinal = az % 90 === 0;
               return (
                 <g key={`az-${az}`}>
                   <line
@@ -294,18 +257,20 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
                     y1={padTop}
                     x2={x}
                     y2={padTop + plotHeight}
-                    stroke="#1E293B"
-                    strokeWidth="0.8"
-                    strokeDasharray="2 3"
+                    stroke={isCardinal ? '#334155' : '#1E293B'}
+                    strokeWidth={isCardinal ? 1 : 0.6}
+                    strokeDasharray={isCardinal ? '4 2' : '2 4'}
+                    strokeOpacity={0.6}
                   />
+                  {/* Azimuth X-Axis Label */}
                   <text
                     x={x}
                     y={padTop + plotHeight + 14}
                     textAnchor="middle"
-                    fill="#94A3B8"
+                    fill={isCardinal ? '#94A3B8' : '#64748B'}
                     fontSize="9"
                     fontFamily="monospace"
-                    fontWeight="500"
+                    fontWeight={isCardinal ? 'bold' : 'normal'}
                   >
                     {label}
                   </text>
@@ -313,162 +278,201 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
               );
             })}
 
-            {/* 5. Sun Indicator Marker on the Plot */}
-            <g className="transition-all duration-300">
-              {/* Vertical Guide to Azimuth Axis */}
-              <line
-                x1={sunX}
-                y1={sunY}
-                x2={sunX}
-                y2={padTop + plotHeight}
-                stroke="#FBBF24"
-                strokeWidth="1"
-                strokeDasharray="2 2"
-                strokeOpacity={isSunAboveHorizon ? 0.6 : 0.3}
-              />
+            {/* 4. Local Topographic Silhouette (Illustrative / Pending LOLA DEM) */}
+            {terrainPathD && (
+              <g opacity="0.6">
+                <path d={terrainAreaD} fill="url(#terrainAreaGradient)" />
+                <path
+                  d={terrainPathD}
+                  fill="none"
+                  stroke="#475569"
+                  strokeWidth="1.2"
+                  strokeDasharray="3 2"
+                />
+              </g>
+            )}
 
-              {/* Sun Marker Glyph (Amber) */}
-              {isSunAboveHorizon ? (
-                <>
-                  {/* Solar Glow Aura */}
-                  <circle
-                    cx={sunX}
-                    cy={sunY}
-                    r="12"
-                    fill="url(#sunMarkerGlow)"
-                    className="animate-pulse"
-                  />
-                  <circle
-                    cx={sunX}
-                    cy={sunY}
-                    r="5"
-                    fill="#FBBF24"
-                    stroke="#FFFFFF"
-                    strokeWidth="1"
-                  />
-                </>
-              ) : (
-                /* Sub-horizon Sun (Dimmed / Dashed - Rule: never show below horizon as geometrically visible) */
-                <g opacity="0.5">
-                  <circle
-                    cx={sunX}
-                    cy={sunY}
-                    r="5"
-                    fill="#451A03"
-                    stroke="#FBBF24"
-                    strokeWidth="1"
-                    strokeDasharray="2 2"
-                  />
-                  <line
-                    x1={sunX - 7}
-                    y1={sunY}
-                    x2={sunX + 7}
-                    y2={sunY}
-                    stroke="#FBBF24"
+            {/* Zero-Degree Geometric Horizon Line Accent */}
+            <line
+              x1={padLeft}
+              y1={zeroHorizonY}
+              x2={padLeft + plotWidth}
+              y2={zeroHorizonY}
+              stroke="#38BDF8"
+              strokeWidth="1.5"
+            />
+
+            {/* Horizon Label Tag */}
+            <text
+              x={padLeft + 6}
+              y={zeroHorizonY - 4}
+              fill="#38BDF8"
+              fontSize="8.5"
+              fontFamily="monospace"
+              fontWeight="bold"
+            >
+              0.0° LOCAL GEOMETRIC HORIZON (TANGENT PLANE)
+            </text>
+
+            {/* 5. Sun Indicator Marker on the Plot */}
+            {isSunAvailable && (
+              <g className="transition-all duration-300">
+                {/* Vertical Guide to Azimuth Axis */}
+                <line
+                  x1={sunX}
+                  y1={sunY}
+                  x2={sunX}
+                  y2={padTop + plotHeight}
+                  stroke="#FBBF24"
+                  strokeWidth="1"
+                  strokeDasharray="2 2"
+                  strokeOpacity={isSunAboveHorizon ? 0.6 : 0.3}
+                />
+
+                {/* Sun Marker Glyph (Amber) */}
+                {isSunAboveHorizon ? (
+                  <>
+                    {/* Glowing Aura */}
+                    <circle
+                      cx={sunX}
+                      cy={sunY}
+                      r="12"
+                      fill="url(#sunMarkerGlow)"
+                    />
+                    <circle
+                      cx={sunX}
+                      cy={sunY}
+                      r="5"
+                      fill="#FBBF24"
+                      stroke="#FFFFFF"
+                      strokeWidth="1"
+                    />
+                  </>
+                ) : (
+                  /* Sub-horizon Sun (Dimmed / Dashed) */
+                  <g opacity="0.5">
+                    <circle
+                      cx={sunX}
+                      cy={sunY}
+                      r="5"
+                      fill="#451A03"
+                      stroke="#FBBF24"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
+                    <line
+                      x1={sunX - 7}
+                      y1={sunY}
+                      x2={sunX + 7}
+                      y2={sunY}
+                      stroke="#FBBF24"
+                      strokeWidth="0.8"
+                    />
+                  </g>
+                )}
+
+                {/* Sun Label Badge */}
+                <g transform={`translate(${sunX}, ${isSunAboveHorizon ? sunY - 14 : sunY + 16})`}>
+                  <rect
+                    x="-42"
+                    y="-10"
+                    width="84"
+                    height="16"
+                    rx="3"
+                    fill="#101827"
+                    stroke={isSunAboveHorizon ? '#FBBF24' : '#475569'}
                     strokeWidth="0.8"
                   />
+                  <text
+                    x="0"
+                    y="2"
+                    textAnchor="middle"
+                    fill={isSunAboveHorizon ? '#FBBF24' : '#94A3B8'}
+                    fontSize="8"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                  >
+                    SUN ({sunPosition.elevation >= 0 ? `+${sunPosition.elevation.toFixed(1)}°` : `${sunPosition.elevation.toFixed(1)}°`})
+                  </text>
                 </g>
-              )}
-
-              {/* Sun Label Badge */}
-              <g transform={`translate(${sunX}, ${isSunAboveHorizon ? sunY - 14 : sunY + 16})`}>
-                <rect
-                  x="-42"
-                  y="-10"
-                  width="84"
-                  height="16"
-                  rx="3"
-                  fill="#101827"
-                  stroke={isSunAboveHorizon ? '#FBBF24' : '#475569'}
-                  strokeWidth="0.8"
-                />
-                <text
-                  x="0"
-                  y="2"
-                  textAnchor="middle"
-                  fill={isSunAboveHorizon ? '#FBBF24' : '#94A3B8'}
-                  fontSize="8"
-                  fontFamily="monospace"
-                  fontWeight="bold"
-                >
-                  SUN ({sunPosition.elevation >= 0 ? `+${sunPosition.elevation.toFixed(1)}°` : `${sunPosition.elevation.toFixed(1)}°`})
-                </text>
               </g>
-            </g>
+            )}
 
             {/* 6. Earth Indicator Marker on the Plot */}
-            <g className="transition-all duration-300">
-              {/* Vertical Guide to Azimuth Axis */}
-              <line
-                x1={earthX}
-                y1={earthY}
-                x2={earthX}
-                y2={padTop + plotHeight}
-                stroke="#60A5FA"
-                strokeWidth="1"
-                strokeDasharray="2 2"
-                strokeOpacity={isEarthAboveHorizon ? 0.6 : 0.3}
-              />
-
-              {/* Earth Marker Glyph (Blue) */}
-              {isEarthAboveHorizon ? (
-                <>
-                  {/* Earth Glow Aura */}
-                  <circle
-                    cx={earthX}
-                    cy={earthY}
-                    r="11"
-                    fill="url(#earthMarkerGlow)"
-                  />
-                  <circle
-                    cx={earthX}
-                    cy={earthY}
-                    r="4.5"
-                    fill="#60A5FA"
-                    stroke="#FFFFFF"
-                    strokeWidth="1"
-                  />
-                </>
-              ) : (
-                /* Sub-horizon Earth (Dimmed / Dashed) */
-                <g opacity="0.5">
-                  <circle
-                    cx={earthX}
-                    cy={earthY}
-                    r="4.5"
-                    fill="#1E293B"
-                    stroke="#60A5FA"
-                    strokeWidth="1"
-                    strokeDasharray="2 2"
-                  />
-                </g>
-              )}
-
-              {/* Earth Label Badge */}
-              <g transform={`translate(${earthX}, ${isEarthAboveHorizon ? earthY - 14 : earthY + 16})`}>
-                <rect
-                  x="-46"
-                  y="-10"
-                  width="92"
-                  height="16"
-                  rx="3"
-                  fill="#101827"
-                  stroke={isEarthAboveHorizon ? '#60A5FA' : '#475569'}
-                  strokeWidth="0.8"
+            {isEarthAvailable && (
+              <g className="transition-all duration-300">
+                {/* Vertical Guide to Azimuth Axis */}
+                <line
+                  x1={earthX}
+                  y1={earthY}
+                  x2={earthX}
+                  y2={padTop + plotHeight}
+                  stroke="#60A5FA"
+                  strokeWidth="1"
+                  strokeDasharray="2 2"
+                  strokeOpacity={isEarthAboveHorizon ? 0.6 : 0.3}
                 />
-                <text
-                  x="0"
-                  y="2"
-                  textAnchor="middle"
-                  fill={isEarthAboveHorizon ? '#60A5FA' : '#94A3B8'}
-                  fontSize="8"
-                  fontFamily="monospace"
-                  fontWeight="bold"
-                >
-                  EARTH ({earthPosition.elevation >= 0 ? `+${earthPosition.elevation.toFixed(1)}°` : `${earthPosition.elevation.toFixed(1)}°`})
-                </text>
+
+                {/* Earth Marker Glyph (Blue) */}
+                {isEarthAboveHorizon ? (
+                  <>
+                    {/* Earth Glow Aura */}
+                    <circle
+                      cx={earthX}
+                      cy={earthY}
+                      r="11"
+                      fill="url(#earthMarkerGlow)"
+                    />
+                    <circle
+                      cx={earthX}
+                      cy={earthY}
+                      r="4.5"
+                      fill="#60A5FA"
+                      stroke="#FFFFFF"
+                      strokeWidth="1"
+                    />
+                  </>
+                ) : (
+                  /* Sub-horizon Earth (Dimmed / Dashed) */
+                  <g opacity="0.5">
+                    <circle
+                      cx={earthX}
+                      cy={earthY}
+                      r="4.5"
+                      fill="#1E293B"
+                      stroke="#60A5FA"
+                      strokeWidth="1"
+                      strokeDasharray="2 2"
+                    />
+                  </g>
+                )}
+
+                {/* Earth Label Badge */}
+                <g transform={`translate(${earthX}, ${isEarthAboveHorizon ? earthY - 14 : earthY + 16})`}>
+                  <rect
+                    x="-46"
+                    y="-10"
+                    width="92"
+                    height="16"
+                    rx="3"
+                    fill="#101827"
+                    stroke={isEarthAboveHorizon ? '#60A5FA' : '#475569'}
+                    strokeWidth="0.8"
+                  />
+                  <text
+                    x="0"
+                    y="2"
+                    textAnchor="middle"
+                    fill={isEarthAboveHorizon ? '#60A5FA' : '#94A3B8'}
+                    fontSize="8"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                  >
+                    EARTH ({earthPosition.elevation >= 0 ? `+${earthPosition.elevation.toFixed(1)}°` : `${earthPosition.elevation.toFixed(1)}°`})
+                  </text>
+                </g>
               </g>
-            </g>
+            )}
           </svg>
 
           {/* Plot Legend & Scientific Convention Footer */}
@@ -476,19 +480,19 @@ export const HorizonView: React.FC<HorizonViewProps> = ({
             <div className="flex items-center gap-4">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-0.5 bg-[#38BDF8] inline-block" />
-                <span className="text-[#38BDF8] font-semibold">0.0° Geometric Horizon</span>
+                <span className="text-[#38BDF8] font-semibold">0.0° Geometric Horizon Plane</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#FBBF24] inline-block" />
-                <span>Sun ({sunPosition.elevation >= 0 ? 'Above 0°' : 'Sub-Horizon'})</span>
+                <span>Sun ({!isSunAvailable ? 'Unavailable' : isSunAboveHorizon ? 'Above 0°' : 'Sub-Horizon'})</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#60A5FA] inline-block" />
-                <span>Earth ({earthPosition.elevation >= 0 ? 'Above 0°' : 'Sub-Horizon'})</span>
+                <span>Earth ({!isEarthAvailable ? 'Unavailable' : isEarthAboveHorizon ? 'Above 0°' : 'Sub-Horizon'})</span>
               </span>
             </div>
             <div className="text-slate-500">
-              CONVENTION: 0° DATUM = LOCAL TANGENT PLANE | EL &lt; 0° = SUB-HORIZON
+              CONVENTION: 0° DATUM = LOCAL TANGENT PLANE | EL &lt; 0° = SUB-HORIZON | LOCAL TERRAIN CREST PENDING LOLA DEM
             </div>
           </div>
         </div>

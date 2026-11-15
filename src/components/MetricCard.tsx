@@ -97,8 +97,12 @@ export const MetricCard: React.FC<MetricCardProps> = ({
     );
   }
 
-  // 2. Missing Data State
-  const hasNoData = isMissingData || value === null || value === undefined;
+  // 2. Missing Data State (Strict guard against null, undefined, NaN, and Infinity)
+  const hasNoData =
+    isMissingData ||
+    value === null ||
+    value === undefined ||
+    (typeof value === 'number' && (!isFinite(value) || isNaN(value)));
 
   return (
     <Card
@@ -119,9 +123,13 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {isDemoData && (
+            {isDemoData ? (
               <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
                 DEMO
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 font-bold">
+                LIVE SPICE
               </span>
             )}
           </div>
@@ -135,7 +143,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
                 --
               </span>
               <span className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3 text-slate-500" /> DATA UNAVAILABLE
+                <AlertCircle className="w-3 h-3 text-slate-500" /> UNAVAILABLE
               </span>
             </div>
           ) : (

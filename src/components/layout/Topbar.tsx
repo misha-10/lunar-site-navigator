@@ -28,7 +28,7 @@ const PAGE_TITLES: Record<NavItemId, { title: string; subtitle: string }> = {
   },
   sources: {
     title: 'Data Sources',
-    subtitle: 'LRO LOLA DEMs, DE421 ephemeris & terrain horizons',
+    subtitle: 'NAIF SPICE ephemeris (DE421), IAU lunar frames & topocentric horizons',
   },
   settings: {
     title: 'System Settings',
@@ -104,12 +104,12 @@ export const Topbar: React.FC<TopbarProps> = ({
           </span>
         </div>
 
-        {/* Dynamic Backend Connection Status */}
+        {/* Dynamic Backend Connection & Ephemeris Status */}
         <div
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#152033] border border-[#263449]"
           title={
             backendStatus.isConnected
-              ? `Connected to ${backendStatus.endpoint} (${backendStatus.latencyMs}ms)`
+              ? `Connected to ${backendStatus.endpoint} (${backendStatus.latencyMs}ms) - Real NASA SPICE Ephemeris Active`
               : `Backend at ${backendStatus.endpoint} unreachable. Operating in standalone demo mode.`
           }
         >
@@ -118,10 +118,12 @@ export const Topbar: React.FC<TopbarProps> = ({
             BACKEND:
           </span>
           <Badge
-            variant={backendStatus.isConnected ? 'success' : 'cyan'}
+            variant={backendStatus.isConnected ? 'success' : 'neutral'}
             hasDot
           >
-            {backendStatus.isConnected ? `LIVE API (${backendStatus.latencyMs}ms)` : 'STANDALONE'}
+            {backendStatus.isConnected
+              ? `LIVE SPICE (${backendStatus.latencyMs}ms)`
+              : 'STANDALONE DEMO'}
           </Badge>
         </div>
 

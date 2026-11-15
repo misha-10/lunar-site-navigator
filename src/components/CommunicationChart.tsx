@@ -42,8 +42,16 @@ export const CommunicationChart: React.FC<CommunicationChartProps> = ({
   // Safe point retrieval for current step
   const activePoint = data[currentStepIndex] || data[0];
 
+  // Dynamic duration and tick interval calculation
+  const totalHours =
+    data.length > 1
+      ? Math.max(1, Math.round(data[data.length - 1].missionHour - data[0].missionHour))
+      : data.length;
+  const totalDays = Math.max(1, Math.round(totalHours / 24));
+  const xAxisInterval = Math.max(1, Math.floor(data.length / 8));
+
   // Check for any missing data in the series
-  const missingDataCount = data.filter((p) => p.earthElevation === null).length;
+  const missingDataCount = data.filter((p) => p.earthElevation === null || Number.isNaN(p.earthElevation)).length;
 
   if (isLoading) {
     return (
@@ -122,9 +130,13 @@ export const CommunicationChart: React.FC<CommunicationChartProps> = ({
           </div>
         )}
 
-        {isDemoData && (
+        {isDemoData ? (
           <div className="text-[9px] text-amber-500/70 border-t border-[#263449]/40 pt-1 text-center">
             DEMONSTRATION SIMULATION
+          </div>
+        ) : (
+          <div className="text-[9px] text-[#34D399]/90 border-t border-[#263449]/40 pt-1 text-center font-bold">
+            LIVE SPICE EPHEMERIS (DE421)
           </div>
         )}
       </div>
@@ -144,14 +156,18 @@ export const CommunicationChart: React.FC<CommunicationChartProps> = ({
               <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-100">
                 Earth Elevation & Direct-To-Earth (DTE) Comm Profile
               </h3>
-              {isDemoData && (
+              {isDemoData ? (
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300/80 border border-amber-500/25">
                   DEMO DATA
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/30 font-bold">
+                  LIVE SPICE EPHEMERIS
                 </span>
               )}
             </div>
             <p className="text-[10px] font-mono text-slate-400">
-              14-Earth-Day Lunar Libration Oscillation vs Horizon Line-of-Sight
+              {totalDays}-Earth-Day ({totalHours}-Hour) Lunar Libration Oscillation vs 0° Geometric Horizon
             </p>
           </div>
         </div>
@@ -197,13 +213,13 @@ export const CommunicationChart: React.FC<CommunicationChartProps> = ({
 
             <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" vertical={false} />
 
-            {/* X-Axis: 14 Days with readable tick intervals (every 48 hours / 2 days) */}
+            {/* X-Axis: Dynamic intervals for clear readability */}
             <XAxis
               dataKey="label"
               tickLine={false}
               axisLine={{ stroke: '#263449' }}
               tick={{ fill: '#64748B', fontSize: 10, fontFamily: 'monospace' }}
-              interval={47}
+              interval={xAxisInterval}
             />
 
             {/* Y-Axis: Earth Elevation in Degrees (-2° to +8°) */}
@@ -283,7 +299,7 @@ export const CommunicationChart: React.FC<CommunicationChartProps> = ({
         <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-1">
           <span className="flex items-center gap-1.5">
             <Wifi className="w-3 h-3 text-[#34D399]" />
-            DIRECT-TO-EARTH (DTE) LINE-OF-SIGHT OVER TIME (336 HOURS)
+            DIRECT-TO-EARTH (DTE) LINE-OF-SIGHT OVER TIME ({totalHours} HOURS)
           </span>
           <span className="text-[9px] text-slate-500">
             Green/Blue = DTE Link Active | Red/Dark = Occulted / Sub-Horizon

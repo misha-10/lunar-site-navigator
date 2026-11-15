@@ -62,7 +62,7 @@ export const HorizonSection: React.FC = () => {
         earthPosition={activeEarthPos}
         terrainProfile={baseData.terrainProfile}
         siteName={selectedSite.name}
-        isDemoData={true}
+        isDemoData={activeSunPos.isDemoData ?? true}
       />
 
       {/* Interactive Verification Toolbar: Elevation Testing */}

@@ -9,25 +9,63 @@ export const MissionMetricsSection: React.FC = () => {
   const [simulateLoading, setSimulateLoading] = useState<boolean>(false);
   const [simulateMissing, setSimulateMissing] = useState<boolean>(false);
 
+  // Evaluate data-source status individually for each subsystem:
+  // Live SPICE requires genuine calculated status, real_ephemeris data_mode, non-null values, and not missing.
+  const isSolarLive =
+    !simulateMissing &&
+    !currentSunPosition.isDemoData &&
+    currentSunPosition.data_mode === 'real_ephemeris' &&
+    currentSunPosition.status === 'calculated' &&
+    currentSunPosition.elevation !== null &&
+    !isNaN(currentSunPosition.elevation);
+
+  const isEarthLive =
+    !simulateMissing &&
+    !currentEarthPosition.isDemoData &&
+    currentEarthPosition.data_mode === 'real_ephemeris' &&
+    currentEarthPosition.status === 'calculated' &&
+    currentEarthPosition.elevation !== null &&
+    !isNaN(currentEarthPosition.elevation);
+
+  const isTimelineLive =
+    !simulateMissing &&
+    !timelineSeries.isDemoData &&
+    timelineSeries.data_mode === 'real_ephemeris' &&
+    timelineSeries.points.length > 0;
+
+  const totalHours = timelineSeries.totalHours || 168;
+
+  const solarEl =
+    simulateMissing || isNaN(currentSunPosition.elevation)
+      ? null
+      : currentSunPosition.elevation;
+
+  const earthEl =
+    simulateMissing || isNaN(currentEarthPosition.elevation)
+      ? null
+      : currentEarthPosition.elevation;
+
   return (
     <div className="space-y-3">
-      {/* Metric Cards Grid Receiving Data Exclusively Through Props */}
+      {/* Metric Cards Grid Receiving Subsystem-Specific Live/Demo Indicators */}
       <MissionMetricsGrid
-        solarElevation={simulateMissing ? null : currentSunPosition.elevation}
-        earthElevation={simulateMissing ? null : currentEarthPosition.elevation}
+        solarElevation={solarEl}
+        earthElevation={earthEl}
         sunlightDurationHours={
           simulateMissing ? null : timelineSeries.summary.totalSunlightHours
         }
         commVisibilityDurationHours={
           simulateMissing ? null : timelineSeries.summary.totalCommHours
         }
-        totalMissionHours={336}
-        isDemoData={true}
+        totalMissionHours={totalHours}
+        isSolarDemo={!isSolarLive}
+        isEarthDemo={!isEarthLive}
+        isTimelineDemo={!isTimelineLive}
         isLoading={simulateLoading}
         isMissingData={simulateMissing}
       />
 
-      {/* Optional State Verification Toolbar (Loading & Missing States) */}
+      {/* State Verification Toolbar (Loading & Missing States) */}
       <div className="px-3.5 py-2 rounded-lg bg-[#101827] border border-[#263449] flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-slate-400">
         <div className="flex items-center gap-2">
           <SlidersHorizontal className="w-3.5 h-3.5 text-[#38BDF8]" />
