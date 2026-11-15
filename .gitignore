@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 node_modules/
 dist/
@@ -5,3 +6,41 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+=======
+# Python virtual environments & bytecode
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment & credentials
+.env
+.env.local
+*.log
+
+# Large binary SPICE ephemeris files (download via kernel script/docs)
+backend/app/data/kernels/*.bsp
+backend/app/data/kernels/*.bpc
+
+# Node / Frontend build (if added)
+node_modules/
+dist/
+build/
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+>>>>>>> 50f50b7261c7d01c11b7a1d6bd4872f13c4e781a
